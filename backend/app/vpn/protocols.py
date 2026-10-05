@@ -1,11 +1,11 @@
-"""Protocol registry. Adding e.g. AmneziaWG = new entry with its own config renderer."""
+"""Protocol registry. A protocol knows how to turn a device into something a client app imports."""
 
 from dataclasses import dataclass
 from typing import Callable
 
 from app.models import Device, Server
 from app.security.crypto import decrypt
-from app.vpn import wireguard
+from app.vpn import vless, wireguard
 
 
 @dataclass(frozen=True)
@@ -14,6 +14,7 @@ class Protocol:
     title: str
     file_ext: str
     render: Callable[[Device, Server], str]
+    subscription: bool  # can be delivered as a subscription URL (Happ & co.)
 
 
 def _render_wireguard(device: Device, server: Server) -> str:
@@ -28,8 +29,21 @@ def _render_wireguard(device: Device, server: Server) -> str:
     )
 
 
+def _render_vless(device: Device, server: Server) -> str:
+    from app.services.servers import flag
+
+    return vless.render_link(
+        user_id=decrypt(device.private_key_enc),
+        host=server.host,
+        port=server.port,
+        params=vless.parse_params(server.params),
+        name=f"{flag(server.country)} NOVA {server.name}",
+    )
+
+
 PROTOCOLS: dict[str, Protocol] = {
-    "wireguard": Protocol("wireguard", "WireGuard", "conf", _render_wireguard),
+    "wireguard": Protocol("wireguard", "WireGuard", "conf", _render_wireguard, subscription=False),
+    "vless": Protocol("vless", "VLESS", "txt", _render_vless, subscription=True),
 }
 
 

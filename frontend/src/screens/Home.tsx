@@ -57,7 +57,7 @@ export function Home() {
     : state === 'connected'
       ? `${vpn.server?.flag} ${vpn.server?.name} · защищённое соединение`
       : state === 'ready'
-        ? 'Включите туннель в приложении WireGuard'
+        ? 'Включите VPN в приложении Happ или WireGuard'
         : 'Получите персональную конфигурацию за 10 секунд'
 
   return (
@@ -100,7 +100,7 @@ export function Home() {
               </>
             ) : state === 'ready' ? (
               <>
-                <Zap size={18} /> ОТКРЫТЬ КОНФИГУРАЦИЮ
+                <Zap size={18} /> ПОЛУЧИТЬ КЛЮЧ
               </>
             ) : (
               <>

@@ -1,4 +1,4 @@
-import { Copy, Download, QrCode, ShieldAlert, FileText } from 'lucide-react'
+import { Copy, Download, FileText, KeyRound, Link2, QrCode, ShieldAlert } from 'lucide-react'
 import QRCode from 'qrcode'
 import { useEffect, useRef, useState } from 'react'
 import { absoluteUrl, api, type ConfigPayload } from '../lib/api'
@@ -8,14 +8,18 @@ import { Sheet } from './Sheet'
 import { useToast } from './Toast'
 import { Segmented, Skeleton } from './ui'
 
-/** Shows a device config as QR (scan from another screen) or file. Never cached or logged. */
+/** Shows how to import a device: subscription (VLESS apps) or file/QR (WireGuard). Never cached or logged. */
 export function ConfigSheet() {
   const { configFor, showConfig, me } = useStore()
   const toast = useToast()
   const [cfg, setCfg] = useState<ConfigPayload | null>(null)
-  const [view, setView] = useState<'qr' | 'file'>(() => (/Android|iPhone|iPad/.test(navigator.userAgent) ? 'file' : 'qr'))
+  const mobile = /Android|iPhone|iPad/.test(navigator.userAgent)
+  const [view, setView] = useState<'qr' | 'text'>(mobile ? 'text' : 'qr')
   const canvas = useRef<HTMLCanvasElement>(null)
   const device = me?.devices.find((d) => d.id === configFor)
+
+  const subUrl = cfg?.subscription_path ? absoluteUrl(cfg.subscription_path) : null
+  const qrPayload = subUrl ?? cfg?.config
 
   useEffect(() => {
     if (configFor == null) return
@@ -30,16 +34,26 @@ export function ConfigSheet() {
   }, [configFor])
 
   useEffect(() => {
-    if (view === 'qr' && cfg && canvas.current) {
-      QRCode.toCanvas(canvas.current, cfg.config, { width: 480, margin: 1, errorCorrectionLevel: 'M' })
+    if (view === 'qr' && qrPayload && canvas.current) {
+      QRCode.toCanvas(canvas.current, qrPayload, { width: 480, margin: 1, errorCorrectionLevel: 'M' })
     }
-  }, [view, cfg])
+  }, [view, qrPayload])
 
   if (configFor == null) return null
 
   const close = () => {
     setCfg(null)
     showConfig(null)
+  }
+
+  const copy = async (text: string, ok: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      haptic.tap('medium')
+      toast(ok)
+    } catch {
+      toast('Не удалось скопировать', 'error')
+    }
   }
 
   const download = () => {
@@ -49,24 +63,16 @@ export function ConfigSheet() {
     toast('Файл конфигурации сохранён')
   }
 
-  const copy = async () => {
-    if (!cfg) return
-    try {
-      await navigator.clipboard.writeText(cfg.config)
-      toast('Скопировано в буфер обмена')
-    } catch {
-      toast('Не удалось скопировать', 'error')
-    }
-  }
+  const isSub = Boolean(subUrl)
 
   return (
-    <Sheet title={device ? `${device.server.flag} ${device.name}` : 'Конфигурация'} onClose={close}>
+    <Sheet title={device ? `${device.server.flag} ${device.name}` : 'Подключение'} onClose={close}>
       <Segmented
         value={view}
         onChange={setView}
         options={[
+          { value: 'text', label: isSub ? <><Link2 size={15} /> Ссылка</> : <><FileText size={15} /> Файл</> },
           { value: 'qr', label: <><QrCode size={15} /> QR-код</> },
-          { value: 'file', label: <><FileText size={15} /> Файл</> },
         ]}
       />
 
@@ -80,9 +86,19 @@ export function ConfigSheet() {
             <canvas ref={canvas} />
           </div>
           <p className="muted" style={{ textAlign: 'center', fontSize: 13 }}>
-            WireGuard → <b>«+»</b> → <b>«Сканировать QR-код»</b>.
-            <br />
-            QR удобно сканировать с экрана компьютера или другого телефона.
+            {isSub ? (
+              <>Happ → <b>«+»</b> → <b>«Сканировать QR-код»</b>. Удобно сканировать с экрана другого устройства.</>
+            ) : (
+              <>WireGuard → <b>«+»</b> → <b>«Сканировать QR-код»</b>. Удобно сканировать с экрана другого устройства.</>
+            )}
+          </p>
+        </>
+      ) : isSub ? (
+        <>
+          <div className="code" style={{ maxHeight: 90 }}>{subUrl}</div>
+          <p className="muted" style={{ fontSize: 13 }}>
+            Скопируйте ссылку и откройте <b>Happ</b>: он сам предложит добавить подписку из буфера обмена (или «+» →
+            «Добавить из буфера»). Подходит и для v2RayTun, Hiddify, v2rayNG, Streisand.
           </p>
         </>
       ) : (
@@ -94,18 +110,33 @@ export function ConfigSheet() {
         </>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 10 }}>
-        <button className="btn primary" onClick={download} disabled={!cfg}>
-          <Download size={18} /> Скачать .conf
-        </button>
-        <button className="btn" onClick={copy} disabled={!cfg} aria-label="Скопировать">
-          <Copy size={18} />
-        </button>
-      </div>
+      {cfg && isSub && subUrl ? (
+        <>
+          <button className="btn primary block" onClick={() => copy(subUrl, 'Ссылка-подписка скопирована')}>
+            <Copy size={18} /> Скопировать подписку
+          </button>
+          <button className="btn small ghost" onClick={() => copy(cfg.config, 'Ключ vless:// скопирован')}>
+            <KeyRound size={15} /> Скопировать ключ vless://
+          </button>
+        </>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 10 }}>
+          <button className="btn primary" onClick={download} disabled={!cfg}>
+            <Download size={18} /> Скачать .conf
+          </button>
+          <button className="btn" onClick={() => cfg && copy(cfg.config, 'Скопировано в буфер обмена')} disabled={!cfg} aria-label="Скопировать">
+            <Copy size={18} />
+          </button>
+        </div>
+      )}
 
       <div className="notice">
         <ShieldAlert size={18} />
-        <span>Это ваш личный ключ. Не пересылайте файл и не показывайте QR другим людям: при утечке перевыпустите конфигурацию в профиле.</span>
+        <span>
+          {isSub
+            ? 'Ссылка — это ваш личный доступ. Не пересылайте её: при утечке перевыпустите ключ в профиле, старая ссылка сразу перестанет работать.'
+            : 'Это ваш личный ключ. Не пересылайте файл и не показывайте QR другим людям: при утечке перевыпустите конфигурацию в профиле.'}
+        </span>
       </div>
     </Sheet>
   )

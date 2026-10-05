@@ -117,9 +117,11 @@ export interface Point {
 }
 
 export interface ConfigPayload {
+  protocol: 'wireguard' | 'vless'
   config: string
   filename: string
   download_path: string
+  subscription_path: string | null
 }
 
 // ---------- Mini App API ----------

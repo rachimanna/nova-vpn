@@ -150,7 +150,7 @@ export function Profile() {
 
       <Card>
         <div className="kv"><span>Аккаунт создан</span><span>{date(user.created_at)}</span></div>
-        <div className="kv"><span>Протокол</span><span>WireGuard</span></div>
+        <div className="kv"><span>Протоколы</span><span>VLESS · WireGuard</span></div>
         <div className="kv"><span>Версия</span><span>NOVA 0.1 MVP</span></div>
       </Card>
     </div>

@@ -17,11 +17,11 @@ from app.db import SessionLocal, init_db
 from app.services.servers import create_server, flag, list_servers
 
 DEMO_SERVERS = [
-    ("de-fra-1", "Germany", "DE", "Frankfurt", "10.8.0.0/24"),
-    ("nl-ams-1", "Netherlands", "NL", "Amsterdam", "10.8.1.0/24"),
-    ("fi-hel-1", "Finland", "FI", "Helsinki", "10.8.2.0/24"),
-    ("se-sto-1", "Sweden", "SE", "Stockholm", "10.8.3.0/24"),
-    ("pl-waw-1", "Poland", "PL", "Warsaw", "10.8.4.0/24"),
+    ("de-fra-1", "Germany", "DE", "Frankfurt", "10.8.0.0/24", "vless"),
+    ("nl-ams-1", "Netherlands", "NL", "Amsterdam", "10.8.1.0/24", "vless"),
+    ("fi-hel-1", "Finland", "FI", "Helsinki", "10.8.2.0/24", "vless"),
+    ("se-sto-1", "Sweden", "SE", "Stockholm", "10.8.3.0/24", "wireguard"),
+    ("pl-waw-1", "Poland", "PL", "Warsaw", "10.8.4.0/24", "wireguard"),
 ]
 
 
@@ -42,13 +42,13 @@ DEMO_USERS = [
 async def seed_demo(with_users: bool = False) -> None:
     await init_db()
     async with SessionLocal() as session:
-        for code, name, country, city, subnet in DEMO_SERVERS:
+        for code, name, country, city, subnet, protocol in DEMO_SERVERS:
             try:
                 await create_server(
                     session, code=code, name=name, country=country, city=city,
-                    host=f"{code}.demo.invalid", driver="mock", subnet=subnet,
+                    host=f"{code}.demo.invalid", driver="mock", subnet=subnet, protocol=protocol,
                 )
-                print(f"+ {flag(country)} {name} ({code}) [mock]")
+                print(f"+ {flag(country)} {name} ({code}) [mock, {protocol}]")
             except ValueError as e:
                 print(f"= {code}: {e}")
         if with_users:
@@ -80,7 +80,7 @@ async def add_server(args: argparse.Namespace) -> None:
             driver="agent", agent_url=args.agent_url, agent_token=args.agent_token, subnet=args.subnet,
             max_peers=args.max_peers,
         )
-        print(f"Added {flag(server.country)} {server.name}: {server.host}:{server.port}, key {server.public_key}")
+        print(f"Added {flag(server.country)} {server.name}: {server.protocol} {server.host}:{server.port}")
 
 
 async def show_servers() -> None:
@@ -88,7 +88,7 @@ async def show_servers() -> None:
     async with SessionLocal() as session:
         for s, configs in await list_servers(session, include_inactive=True):
             state = "online" if s.online else "offline"
-            print(f"{s.id:>3} {flag(s.country)} {s.code:<12} {s.driver:<5} {s.host}:{s.port} "
+            print(f"{s.id:>3} {flag(s.country)} {s.code:<12} {s.protocol:<9} {s.driver:<5} {s.host}:{s.port} "
                   f"{state:<7} configs={configs}/{s.max_peers} active={s.is_active}")
 
 
@@ -104,7 +104,7 @@ def main() -> None:
     a.add_argument("--name", required=True)
     a.add_argument("--country", required=True, help="ISO code, e.g. DE")
     a.add_argument("--city")
-    a.add_argument("--host", required=True, help="public IP or domain clients connect to")
+    a.add_argument("--host", required=True, help="public IP (WireGuard) or the node domain (VLESS)")
     a.add_argument("--agent-url", required=True)
     a.add_argument("--agent-token", required=True)
     a.add_argument("--subnet", default="10.8.0.0/24")

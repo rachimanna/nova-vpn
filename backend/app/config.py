@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     bot_token: str = ""
     webapp_url: str = ""  # public HTTPS URL of the Mini App
     initdata_max_age: int = 86400  # seconds
+    support_url: str = ""  # shown in Happ & co. as the support button, e.g. https://t.me/your_bot
 
     # Storage
     database_url: str = "sqlite+aiosqlite:///./nova.db"

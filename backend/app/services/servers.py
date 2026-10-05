@@ -1,3 +1,4 @@
+import json
 from urllib.parse import urlparse
 
 from sqlalchemy import func, select
@@ -6,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import Device, Server
 from app.security.crypto import encrypt
 from app.vpn.drivers import AgentDriver, NodeError
+from app.vpn.protocols import PROTOCOLS
 from app.vpn.wireguard import is_valid_key
 
 
@@ -81,8 +83,10 @@ async def create_server(
     subnet: str = "10.8.0.0/24",
     dns: str = "1.1.1.1, 1.0.0.1",
     max_peers: int = 250,
+    protocol: str = "wireguard",
+    params: dict | None = None,
 ) -> Server:
-    """For agent nodes the server public key and port are fetched from the node itself."""
+    """For agent nodes protocol, keys, port and client params are fetched from the node itself."""
     if driver == "agent":
         if not agent_url or not agent_token:
             raise ValueError("agent_url и agent_token обязательны")
@@ -94,16 +98,22 @@ async def create_server(
             raise ValueError(f"Агент недоступен: {e}") from e
         finally:
             await agent.aclose()
-        public_key, port = info.public_key, info.listen_port
+        public_key, port, protocol = info.public_key, info.listen_port, info.protocol
         subnet = info.subnet or subnet
+        params = info.params
     elif driver == "mock":
         from app.vpn.wireguard import generate_keypair
 
-        public_key = public_key or generate_keypair().public_key
+        if protocol == "wireguard":
+            public_key = public_key or generate_keypair().public_key
+        else:
+            port, params = 443, params or {"transport": "ws", "path": "/demo", "sni": host, "security": "tls"}
     else:
         raise ValueError("driver: agent | mock")
 
-    if not public_key or not is_valid_key(public_key):
+    if protocol not in PROTOCOLS:
+        raise ValueError(f"Неизвестный протокол {protocol}")
+    if protocol == "wireguard" and (not public_key or not is_valid_key(public_key)):
         raise ValueError("Некорректный публичный ключ сервера")
     if await session.scalar(select(Server.id).where(Server.code == code)):
         raise ValueError(f"Сервер с кодом {code} уже существует")
@@ -118,7 +128,9 @@ async def create_server(
         driver=driver,
         agent_url=agent_url,
         agent_token_enc=encrypt(agent_token) if agent_token else None,
-        public_key=public_key,
+        public_key=public_key or "",
+        protocol=protocol,
+        params=json.dumps(params or {}),
         subnet=subnet,
         dns=dns,
         max_peers=max_peers,

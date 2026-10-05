@@ -1,5 +1,7 @@
-# One-server deployment: WireGuard + agent are installed on the host by vpn-agent/install.sh,
-# this file runs API + Mini App, the bot and Caddy (free HTTPS) next to them.
+# One-server deployment. The VPN node (Xray or WireGuard) + agent are installed on the host by
+# vpn-agent/install.sh; this file runs the API + Mini App and the bot next to them.
+#   VLESS:     install.sh already set up Caddy (HTTPS) -> docker compose up -d
+#   WireGuard: no Caddy on the host yet          -> docker compose --profile caddy up -d
 # host networking: the API reaches the agent on 127.0.0.1:8787, Caddy reaches the API on 127.0.0.1:8000.
 x-app: &app
   build: { context: ., dockerfile: backend/Dockerfile }
@@ -21,6 +23,7 @@ services:
     depends_on: [api]
 
   caddy:
+    profiles: ["caddy"]
     image: caddy:2-alpine
     network_mode: host
     restart: unless-stopped

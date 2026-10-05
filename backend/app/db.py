@@ -33,8 +33,30 @@ async def get_session() -> AsyncIterator[AsyncSession]:
         yield session
 
 
+# Columns added after the first release. create_all() never alters existing tables,
+# so add them here until the project grows real migrations (Alembic).
+_ADDED_COLUMNS = {
+    "servers": {"params": "TEXT NOT NULL DEFAULT '{}'"},
+    "devices": {"sub_token": "VARCHAR(48)"},
+}
+
+
+def _add_missing_columns(conn) -> None:
+    from sqlalchemy import inspect, text
+
+    insp = inspect(conn)
+    for table, columns in _ADDED_COLUMNS.items():
+        if not insp.has_table(table):
+            continue
+        existing = {c["name"] for c in insp.get_columns(table)}
+        for name, ddl in columns.items():
+            if name not in existing:
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
+
+
 async def init_db() -> None:
     from app import models  # noqa: F401  register tables
 
     async with engine.begin() as conn:
+        await conn.run_sync(_add_missing_columns)
         await conn.run_sync(Base.metadata.create_all)

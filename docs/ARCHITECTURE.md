@@ -19,7 +19,7 @@
 | База | **SQLite** (MVP) → PostgreSQL заменой `DATABASE_URL` | Ноль настройки, 0 ₽ |
 | Bot | aiogram 3, long polling | Не нужен вебхук и домен для бота |
 | Mini App + Admin | React + Vite + TypeScript (статический SPA) | Next.js не нужен: SSR не требуется, статику можно хостить бесплатно где угодно или отдавать из FastAPI |
-| VPN | WireGuard (kernel) | Open-source, быстрый, клиенты на всех платформах, есть импорт по QR |
+| VPN | **VLESS over WebSocket + TLS** (Xray) и WireGuard | VLESS — подписки для Happ и аналогов, трафик выглядит как HTTPS вашего домена; WireGuard — максимальная скорость |
 | Управление VPN-нодой | `vpn-agent` — маленький FastAPI-сервис на каждой ноде | Backend никогда не видит приватный ключ сервера; ноды добавляются через админку |
 | HTTPS | Caddy (Let's Encrypt) или Cloudflare Tunnel | Оба бесплатны |
 

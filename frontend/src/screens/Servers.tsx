@@ -60,6 +60,7 @@ export function Servers() {
                 <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 650 }}>
                   {s.name}
                   {s.id === best && <span className="pill ok" style={{ height: 20, fontSize: 10 }}>Лучший</span>}
+                  <span className="pill" style={{ height: 20, fontSize: 10 }}>{s.protocol === 'wireguard' ? 'WireGuard' : 'VLESS'}</span>
                 </span>
                 <span className="faint" style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
                   <span className={`dot ${s.status === 'online' ? LOAD_TONE[s.load_level] : 'bad'}`} />
@@ -84,7 +85,7 @@ export function Servers() {
       {servers && list.length === 0 && <div className="empty">Ничего не найдено</div>}
 
       <p className="faint" style={{ fontSize: 12, textAlign: 'center', padding: '0 12px' }}>
-        Ping — задержка до сервера из нашей сети. Точное значение для вашего устройства покажет WireGuard после подключения.
+        Ping — задержка до сервера из нашей сети. Точное значение для вашего устройства покажет приложение после подключения.
       </p>
 
       {picked && <MoveSheet server={picked} onClose={() => setPicked(null)} />}
@@ -101,7 +102,8 @@ function MoveSheet({ server, onClose }: { server: Server; onClose: () => void })
   return (
     <Sheet title={`${server.flag} ${server.name}`} onClose={onClose}>
       <p className="muted" style={{ fontSize: 14 }}>
-        Сервер выбран для новых конфигураций. Перенести существующее устройство?
+        Сервер выбран для новых ключей. Перенести существующее устройство? Для VLESS-подписки ничего переимпортировать не
+        нужно — Happ обновит её сам.
       </p>
       <Card className="list" style={{ padding: 0 }}>
         {devices.map((d) => (

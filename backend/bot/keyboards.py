@@ -5,9 +5,9 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from app.config import get_settings
 
 CLIENTS = {
-    "📱 iPhone": "https://apps.apple.com/app/wireguard/id1441195209",
-    "🤖 Android": "https://play.google.com/store/apps/details?id=com.wireguard.android",
-    "💻 Windows / macOS": "https://www.wireguard.com/install/",
+    "📱 Happ для iPhone": "https://apps.apple.com/app/happ-proxy-utility/id6504287215",
+    "🤖 Happ для Android": "https://play.google.com/store/apps/details?id=com.happproxy",
+    "💻 Happ для Windows / macOS": "https://www.happ.su/main",
 }
 
 

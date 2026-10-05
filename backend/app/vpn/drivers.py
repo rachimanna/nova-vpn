@@ -33,6 +33,8 @@ class NodeInfo:
     public_key: str
     listen_port: int
     subnet: str | None = None
+    protocol: str = "wireguard"
+    params: dict = field(default_factory=dict)
 
 
 class NodeDriver(Protocol):
@@ -60,7 +62,13 @@ class AgentDriver:
 
     async def info(self) -> NodeInfo:
         d = await self._call("GET", "/info")
-        return NodeInfo(public_key=d["public_key"], listen_port=d["listen_port"], subnet=d.get("subnet"))
+        return NodeInfo(
+            public_key=d.get("public_key", ""),
+            listen_port=d["listen_port"],
+            subnet=d.get("subnet"),
+            protocol=d.get("protocol", "wireguard"),
+            params=d.get("params") or {},
+        )
 
     async def peers(self) -> list[PeerStat]:
         d = await self._call("GET", "/peers")
@@ -108,7 +116,7 @@ class MockDriver:
         self.peers_map = self._state.setdefault(server.code, {})
 
     async def info(self) -> NodeInfo:
-        return NodeInfo(public_key=self.server.public_key, listen_port=self.server.port)
+        return NodeInfo(public_key=self.server.public_key, listen_port=self.server.port, protocol=self.server.protocol)
 
     async def peers(self) -> list[PeerStat]:
         now = datetime.now(UTC)

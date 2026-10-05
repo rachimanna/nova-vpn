@@ -102,7 +102,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // default server = remembered one if still available, otherwise the best online one
   const fallback = servers
     ?.filter((s) => s.status === 'online')
-    .sort((a, b) => a.load - b.load || (a.ping_ms ?? 999) - (b.ping_ms ?? 999))[0]?.id
+    // VLESS first: it works with Happ & co. and survives DPI better than WireGuard
+    .sort(
+      (a, b) =>
+        Number(a.protocol === 'wireguard') - Number(b.protocol === 'wireguard') ||
+        a.load - b.load ||
+        (a.ping_ms ?? 999) - (b.ping_ms ?? 999),
+    )[0]?.id
   const effectiveServer = servers?.some((s) => s.id === serverId && s.status === 'online') ? serverId : fallback ?? null
 
   return (

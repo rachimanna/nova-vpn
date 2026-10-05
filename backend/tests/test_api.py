@@ -1,3 +1,4 @@
+import base64
 import json
 import time
 
@@ -30,16 +31,17 @@ async def test_device_lifecycle(client):
 
     servers = (await client.get("/api/servers", headers=DEV)).json()
     assert len(servers) == 5 and servers[0]["flag"] == "🇩🇪"
+    wg = [s for s in servers if s["protocol"] == "wireguard"]
 
-    r = await client.post("/api/devices", headers=DEV, json={"server_id": servers[0]["id"], "name": "iPhone", "platform": "ios"})
+    r = await client.post("/api/devices", headers=DEV, json={"server_id": wg[0]["id"], "name": "iPhone", "platform": "ios"})
     assert r.status_code == 201, r.text
     device = r.json()
-    assert device["address"] == "10.8.0.2/32"
+    assert device["address"] == "10.8.3.2/32"
     assert "private" not in json.dumps(device).lower()
 
     cfg = (await client.get(f"/api/devices/{device['id']}/config", headers=DEV)).json()
     assert "[Interface]" in cfg["config"] and "PresharedKey" in cfg["config"]
-    assert cfg["filename"].endswith(".conf")
+    assert cfg["filename"].endswith(".conf") and cfg["subscription_path"] is None
 
     file = await client.get(cfg["download_path"])
     assert file.status_code == 200 and file.text == cfg["config"]
@@ -53,8 +55,8 @@ async def test_device_lifecycle(client):
     assert new_cfg["config"] != cfg["config"]
     assert (await client.get(cfg["download_path"])).status_code == 404  # old link dies with old keys
 
-    moved = (await client.post(f"/api/devices/{device['id']}/regenerate", headers=DEV, json={"server_id": servers[1]["id"]})).json()
-    assert moved["server"]["code"] == "nl-ams-1" and moved["address"] == "10.8.1.2/32"
+    moved = (await client.post(f"/api/devices/{device['id']}/regenerate", headers=DEV, json={"server_id": wg[1]["id"]})).json()
+    assert moved["server"]["code"] == "pl-waw-1" and moved["address"] == "10.8.4.2/32"
 
     assert (await client.delete(f"/api/devices/{device['id']}", headers=DEV)).status_code == 200
     assert (await client.get(f"/api/devices/{device['id']}/config", headers=DEV)).status_code == 409
@@ -107,3 +109,39 @@ async def test_admin(client):
     assert (await client.post("/api/admin/exchange", json={"token": link})).status_code == 200
     bad = sign_token("admin_link", {"tg": 43}, 60)
     assert (await client.post("/api/admin/exchange", json={"token": bad})).status_code == 403
+
+
+async def test_vless_subscription(client):
+    h = {"X-Dev-User": "4004"}
+    servers = (await client.get("/api/servers", headers=h)).json()
+    vl = [s for s in servers if s["protocol"] == "vless"]
+    device = (await client.post("/api/devices", headers=h, json={"server_id": vl[0]["id"], "name": "Happ"})).json()
+    assert device["protocol"] == "vless"
+
+    cfg = (await client.get(f"/api/devices/{device['id']}/config", headers=h)).json()
+    link = cfg["config"]
+    assert link.startswith("vless://") and "security=tls" in link and "type=ws" in link and "path=%2Fdemo" in link
+    sub_path = cfg["subscription_path"]
+    assert sub_path.startswith("/api/sub/")
+
+    sub = await client.get(sub_path)  # no auth: the token is the secret, like any VPN subscription
+    assert sub.status_code == 200
+    assert base64.b64decode(sub.text).decode() == link
+    assert sub.headers["profile-title"].startswith("base64:")
+    assert "total=53687091200" in sub.headers["subscription-userinfo"]
+
+    # moving to another server keeps uuid and subscription: Happ just refreshes
+    moved = (await client.post(f"/api/devices/{device['id']}/regenerate", headers=h, json={"server_id": vl[1]["id"]})).json()
+    assert moved["server"]["id"] == vl[1]["id"]
+    cfg2 = (await client.get(f"/api/devices/{device['id']}/config", headers=h)).json()
+    assert cfg2["subscription_path"] == sub_path
+    assert link.split("@")[0] == cfg2["config"].split("@")[0]  # same uuid
+
+    # rotating keys on the same server kills the old subscription and uuid
+    r = await client.post(f"/api/devices/{device['id']}/regenerate", headers=h, json={})
+    assert r.status_code == 200, r.text
+    cfg3 = (await client.get(f"/api/devices/{device['id']}/config", headers=h)).json()
+    assert cfg3["subscription_path"] != sub_path and cfg3["config"].split("@")[0] != link.split("@")[0]
+    assert (await client.get(sub_path)).status_code == 404
+
+    assert (await client.get("/api/sub/" + "x" * 32)).status_code == 404

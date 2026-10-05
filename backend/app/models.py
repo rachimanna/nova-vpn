@@ -60,15 +60,17 @@ class Server(Base):
     country: Mapped[str] = mapped_column(String(2))  # ISO-3166 alpha-2, flag derived from it
     city: Mapped[str | None] = mapped_column(String(64))
 
-    protocol: Mapped[str] = mapped_column(String(16), default="wireguard")
+    protocol: Mapped[str] = mapped_column(String(16), default="wireguard")  # wireguard | vless
     driver: Mapped[str] = mapped_column(String(16), default="agent")  # agent | mock
+    # Non-secret client parameters reported by the node, JSON (vless: transport, path, sni, security)
+    params: Mapped[str] = mapped_column(Text, default="{}")
     agent_url: Mapped[str | None] = mapped_column(String(255))
     agent_token_enc: Mapped[str | None] = mapped_column(Text)
 
     host: Mapped[str] = mapped_column(String(255))  # public endpoint for clients
     port: Mapped[int] = mapped_column(Integer, default=51820)
-    public_key: Mapped[str] = mapped_column(String(64))
-    subnet: Mapped[str] = mapped_column(String(43), default="10.8.0.0/24")
+    public_key: Mapped[str] = mapped_column(String(64), default="")  # WireGuard only
+    subnet: Mapped[str] = mapped_column(String(43), default="10.8.0.0/24")  # WireGuard only
     dns: Mapped[str] = mapped_column(String(128), default="1.1.1.1, 1.0.0.1")
     max_peers: Mapped[int] = mapped_column(Integer, default=250)
 
@@ -104,10 +106,14 @@ class Device(Base):
     protocol: Mapped[str] = mapped_column(String(16), default="wireguard")
     status: Mapped[str] = mapped_column(String(16), default="active", index=True)  # active | revoked
 
+    # WireGuard: public key / private key / psk / tunnel IP.
+    # VLESS: user label (Xray "email") / uuid / uuid / label (keeps the per-server unique index happy).
     public_key: Mapped[str] = mapped_column(String(64), unique=True)
     private_key_enc: Mapped[str] = mapped_column(Text)
     psk_enc: Mapped[str] = mapped_column(Text)
     address: Mapped[str] = mapped_column(String(43))
+    # Secret part of the subscription URL (Happ, v2RayTun, …); rotates with the credentials
+    sub_token: Mapped[str | None] = mapped_column(String(48), unique=True)
 
     # Client perspective, accumulated across node counter resets
     download_bytes: Mapped[int] = mapped_column(BigInteger, default=0)
