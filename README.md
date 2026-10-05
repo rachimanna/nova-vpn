@@ -1,4 +1,3 @@
-# NOVA VPN
 
 **Быстрый. Приватный. Простой.** MVP VPN-сервиса: Telegram-бот, Telegram Mini App, backend, база, собственные VPN-серверы (VLESS и WireGuard), персональные ключи, устройства и админ-панель.
 
