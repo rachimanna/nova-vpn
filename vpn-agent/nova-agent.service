@@ -1,0 +1,19 @@
+[Unit]
+Description=NOVA VPN node agent
+After=network-online.target wg-quick@wg0.service
+Requires=wg-quick@wg0.service
+
+[Service]
+EnvironmentFile=/etc/nova-agent.env
+WorkingDirectory=/opt/nova-agent
+ExecStart=/opt/nova-agent/.venv/bin/uvicorn agent:app --host ${AGENT_BIND} --port ${AGENT_PORT} --no-access-log
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/nova-agent
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

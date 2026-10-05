@@ -1,0 +1,36 @@
+# One-server deployment: WireGuard + agent are installed on the host by vpn-agent/install.sh,
+# this file runs API + Mini App, the bot and Caddy (free HTTPS) next to them.
+# host networking: the API reaches the agent on 127.0.0.1:8787, Caddy reaches the API on 127.0.0.1:8000.
+x-app: &app
+  build: { context: ., dockerfile: backend/Dockerfile }
+  image: nova-vpn
+  env_file: .env
+  environment:
+    DATABASE_URL: sqlite+aiosqlite:////data/nova.db
+  volumes: ["nova_data:/data"]
+  network_mode: host
+  restart: unless-stopped
+
+services:
+  api:
+    <<: *app
+
+  bot:
+    <<: *app
+    command: ["python", "-m", "bot.main"]
+    depends_on: [api]
+
+  caddy:
+    image: caddy:2-alpine
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on: [api]
+
+volumes:
+  caddy_data:
+  nova_data:

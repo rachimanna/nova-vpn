@@ -1,0 +1,71 @@
+/* NOVA design tokens. Dark is the primary theme, light mirrors it. */
+:root {
+  --font: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+
+  --nova-1: #8b5cf6;
+  --nova-2: #6366f1;
+  --nova-3: #22d3ee;
+  --grad: linear-gradient(135deg, var(--nova-1) 0%, var(--nova-2) 45%, var(--nova-3) 100%);
+  --grad-soft: linear-gradient(135deg, rgba(139, 92, 246, 0.18), rgba(34, 211, 238, 0.12));
+
+  --ok: #34d399;
+  --ok-soft: rgba(52, 211, 153, 0.14);
+  --warn: #fbbf24;
+  --warn-soft: rgba(251, 191, 36, 0.14);
+  --bad: #f87171;
+  --bad-soft: rgba(248, 113, 113, 0.14);
+  --idle: #94a3b8;
+
+  --r-sm: 10px;
+  --r-md: 14px;
+  --r-lg: 20px;
+  --r-xl: 28px;
+
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  --safe-top: max(env(safe-area-inset-top), var(--tg-safe-area-inset-top, 0px));
+  --safe-bottom: max(env(safe-area-inset-bottom), var(--tg-safe-area-inset-bottom, 0px));
+  --nav-h: 64px;
+}
+
+:root,
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #07070c;
+  --bg-2: #0d0d16;
+  --surface: rgba(255, 255, 255, 0.045);
+  --surface-2: rgba(255, 255, 255, 0.075);
+  --surface-solid: #12121c;
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --text: #f4f5fb;
+  --text-2: #a3a7bb;
+  --text-3: #6b6f86;
+  --glass: rgba(16, 16, 26, 0.72);
+  --shadow: 0 10px 40px -12px rgba(0, 0, 0, 0.7);
+  --aurora-a: rgba(139, 92, 246, 0.28);
+  --aurora-b: rgba(34, 211, 238, 0.16);
+  --skeleton: rgba(255, 255, 255, 0.06);
+  --skeleton-hi: rgba(255, 255, 255, 0.12);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg: #f3f4f9;
+  --bg-2: #eceef6;
+  --surface: rgba(255, 255, 255, 0.78);
+  --surface-2: rgba(255, 255, 255, 0.95);
+  --surface-solid: #ffffff;
+  --border: rgba(15, 18, 40, 0.07);
+  --border-strong: rgba(15, 18, 40, 0.14);
+  --text: #0c0d18;
+  --text-2: #565b73;
+  --text-3: #8d91a8;
+  --glass: rgba(255, 255, 255, 0.78);
+  --shadow: 0 10px 34px -14px rgba(30, 30, 80, 0.25);
+  --aurora-a: rgba(139, 92, 246, 0.16);
+  --aurora-b: rgba(34, 211, 238, 0.12);
+  --skeleton: rgba(15, 18, 40, 0.06);
+  --skeleton-hi: rgba(15, 18, 40, 0.11);
+}
