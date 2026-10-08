@@ -5,6 +5,7 @@ import time
 from app.security.crypto import sign_token
 from app.security.telegram import sign_init_data
 from app.tasks import poll_once
+from app.vpn.drivers import MockDriver
 
 DEV = {"X-Dev-User": "1001"}
 
@@ -69,6 +70,10 @@ async def test_device_limit_and_poller(client):
     r = await client.post("/api/devices", headers=h, json={"server_id": 3, "name": "d4"})
     assert r.status_code == 409 and "лимит" in r.json()["detail"].lower()
 
+    # mock peers start online with p=0.7: pin them so the test is not flaky
+    for peers in MockDriver._state.values():
+        for peer in peers.values():
+            peer.online = True
     for _ in range(3):
         await poll_once()
     me = (await client.get("/api/me", headers=h)).json()
