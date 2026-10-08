@@ -104,6 +104,9 @@ async def settings(cb: CallbackQuery) -> None:
 async def toggle_notifications(cb: CallbackQuery) -> None:
     async with SessionLocal() as session:
         user = await session.scalar(select(User).where(User.tg_id == cb.from_user.id))
+        if user is None:
+            await cb.answer("Нажмите /start, чтобы создать профиль", show_alert=True)
+            return
         user.notifications = not user.notifications
         await session.commit()
     await settings(cb)
@@ -113,7 +116,7 @@ async def send_admin_link(message: Message, tg_id: int) -> None:
     base = get_settings().webapp_url.rstrip("/")
     token = sign_token("admin_link", {"tg": tg_id}, ttl=600)
     await message.answer(
-        "🛠 <b>Админ-панель</b>\nСсылка действует 10 минут. Никому её не пересылайте.",
+        "🛠 <b>Админ-панель</b>\nСсылка одноразовая и действует 10 минут. Никому её не пересылайте.",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[[InlineKeyboardButton(text="Открыть админ-панель", url=f"{base}/admin?t={token}")]]
         ),
@@ -129,8 +132,13 @@ async def admin_cmd(message: Message) -> None:
 
 @router.callback_query(F.data == "admin")
 async def admin_cb(cb: CallbackQuery) -> None:
-    if cb.from_user.id in get_settings().admin_ids:
-        await send_admin_link(cb.message, cb.from_user.id)
+    if cb.from_user.id not in get_settings().admin_ids:
+        await cb.answer()
+        return
+    if not isinstance(cb.message, Message):
+        await cb.answer("Отправьте команду /admin в чат с ботом", show_alert=True)
+        return
+    await send_admin_link(cb.message, cb.from_user.id)
     await cb.answer()
 
 
@@ -158,9 +166,16 @@ async def expiry_reminders(bot: Bot) -> None:
                 for user in users:
                     if user.expiry_notified_at and now - user.expiry_notified_at < timedelta(days=1):
                         continue
-                    with contextlib.suppress(TelegramForbiddenError, TelegramBadRequest):
+                    delivered = False
+                    try:
                         await bot.send_message(user.tg_id, texts.expiry_reminder(user))
-                    user.expiry_notified_at = now
+                        delivered = True
+                    except TelegramForbiddenError:
+                        delivered = True  # blocked the bot; sending again will not succeed
+                    except TelegramBadRequest:
+                        log.warning("expiry reminder rejected for tg_id %s", user.tg_id)
+                    if delivered:
+                        user.expiry_notified_at = now
                     await asyncio.sleep(0.05)  # stay well below Telegram flood limits
                 await session.commit()
         except Exception:

@@ -99,15 +99,24 @@ async def poll_server(session: AsyncSession, server: Server) -> None:
     await session.commit()
 
 
-async def poll_once() -> None:
+async def _poll_server_id(server_id: int) -> None:
     async with SessionLocal() as session:
-        servers = (await session.scalars(select(Server).where(Server.is_active.is_(True)))).all()
-        for server in servers:
-            try:
-                await poll_server(session, server)
-            except Exception:
-                log.exception("poll failed for server %s", server.code)
-                await session.rollback()
+        server = await session.get(Server, server_id)
+        if server is None or not server.is_active:
+            return
+        try:
+            await poll_server(session, server)
+        except Exception:
+            log.exception("poll failed for server %s", server.code)
+            await session.rollback()
+
+
+async def poll_once() -> None:
+    # One dead node used to delay the ping of every server after it.
+    async with SessionLocal() as session:
+        ids = list((await session.scalars(select(Server.id).where(Server.is_active.is_(True)))).all())
+    if ids:
+        await asyncio.gather(*(_poll_server_id(server_id) for server_id in ids))
 
 
 async def prune_samples() -> None:

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import secrets
 from dataclasses import dataclass
@@ -18,6 +19,13 @@ from app.vpn.protocols import get_protocol
 log = logging.getLogger(__name__)
 
 PLATFORMS = {"ios", "android", "windows", "macos", "linux", "other"}
+# Columns that decide whether a user may receive a config. Refreshed explicitly so a
+# concurrent request sees a ban, a new limit or spent traffic without dropping the
+# already-loaded devices collection (that would lazy-load inside async code).
+_ACCESS_FIELDS = ["is_banned", "expires_at", "traffic_used", "traffic_limit", "device_limit"]
+# One process, one loop: serialise config mutations so two requests cannot take the same
+# WireGuard address. WireGuard silently moves an allowed-ip to the newest peer.
+_mutation_lock = asyncio.Lock()
 
 
 class DeviceError(Exception):
@@ -114,6 +122,41 @@ async def remove_peer_quietly(server: Server, public_key: str) -> None:
         pass  # reconcile will remove it later
 
 
+async def _seen_snapshot(session: AsyncSession) -> None:
+    """Close the open read transaction so the next query sees other requests' commits."""
+    await session.commit()
+
+
+async def _active_count(session: AsyncSession, user_id: int) -> int:
+    value = await session.scalar(
+        select(func.count(Device.id)).where(Device.user_id == user_id, Device.status == "active")
+    )
+    return int(value or 0)
+
+
+async def _drop_peer_and_heal(session: AsyncSession, server: Server, creds: Credentials) -> None:
+    """Drop a peer that lost the DB race and give the address back to its owner.
+
+    Adding a WireGuard peer removes that allowed-ip from whoever had it. If our insert then
+    loses the unique index, the winner's tunnel is left with no address until we push it again.
+    """
+    await remove_peer_quietly(server, creds.key)
+    owner = await session.scalar(
+        select(Device).where(
+            Device.server_id == server.id,
+            Device.address == creds.address,
+            Device.status == "active",
+            Device.public_key != creds.key,
+        )
+    )
+    if owner is None:
+        return
+    try:
+        await get_driver(server).add_peer(owner.public_key, decrypt(owner.psk_enc), owner.address)
+    except NodeError as e:
+        log.warning("restore peer failed on %s: %s", server.code, e)
+
+
 def _check_access(user: User) -> None:
     state = access_state(user)
     if state is not Access.ACTIVE:
@@ -123,70 +166,97 @@ def _check_access(user: User) -> None:
 async def create_device(
     session: AsyncSession, user: User, *, server_id: int, name: str, platform: str, enforce_limits: bool = True
 ) -> Device:
-    if enforce_limits:
-        _check_access(user)
-        if len(active_devices(user)) >= user.device_limit:
-            raise DeviceError(f"Достигнут лимит устройств ({user.device_limit})", 409)
-    name = name.strip()[:48] or "Устройство"
-    platform = platform if platform in PLATFORMS else "other"
-    server = await _get_server(session, server_id)
+    async with _mutation_lock:
+        await _seen_snapshot(session)
+        await session.refresh(user, attribute_names=_ACCESS_FIELDS)
+        if enforce_limits:
+            _check_access(user)
+            if await _active_count(session, user.id) >= user.device_limit:
+                raise DeviceError(f"Достигнут лимит устройств ({user.device_limit})", 409)
+        name = name.strip()[:48] or "Устройство"
+        platform = platform if platform in PLATFORMS else "other"
+        server = await _get_server(session, server_id)
 
-    creds = await _provision(session, server)
-    device = Device(user_id=user.id, name=name, platform=platform, sub_token=secrets.token_urlsafe(24))
-    _apply(device, server, creds)
-    session.add(device)
-    try:
-        await session.commit()
-    except IntegrityError as e:
-        await session.rollback()
-        await remove_peer_quietly(server, creds.key)
-        raise DeviceError("Конфликт адресов, повторите попытку", 409) from e
-    user.devices.append(device)
-    log.info("device %s created for user %s on %s", device.id, user.id, server.code)
-    return device
+        creds = await _provision(session, server)
+        device = Device(user_id=user.id, name=name, platform=platform, sub_token=secrets.token_urlsafe(24))
+        _apply(device, server, creds)
+        session.add(device)
+        kept_server_id = server.id
+        try:
+            await session.commit()
+        except IntegrityError as e:
+            await session.rollback()
+            fresh = await session.get(Server, kept_server_id)
+            if fresh is not None:
+                await _drop_peer_and_heal(session, fresh, creds)
+            raise DeviceError("Конфликт адресов, повторите попытку", 409) from e
+        user.devices.append(device)
+        log.info("device %s created for user %s on %s", device.id, user.id, server.code)
+        return device
 
 
 async def revoke_device(session: AsyncSession, device: Device) -> None:
-    if device.status != "active":
-        return
-    device.status = "revoked"
-    device.revoked_at = datetime.now(UTC)
-    device.session_started_at = None
-    await session.commit()
-    await remove_peer_quietly(device.server, device.public_key)
-    log.info("device %s revoked", device.id)
+    async with _mutation_lock:
+        await _seen_snapshot(session)
+        await session.refresh(device, attribute_names=["status"])
+        if device.status != "active":
+            return
+        device.status = "revoked"
+        device.revoked_at = datetime.now(UTC)
+        device.session_started_at = None
+        server, public_key = device.server, device.public_key
+        await session.commit()
+        await remove_peer_quietly(server, public_key)
+        log.info("device %s revoked", device.id)
 
 
 async def regenerate_device(session: AsyncSession, device: Device, server_id: int | None = None) -> Device:
     """Same server (or no server given): rotate credentials, the old config stops working.
     Another server: move the device. VLESS keeps its uuid and subscription URL, so apps like Happ
     pick up the new server on the next subscription refresh without re-import."""
-    if device.status != "active":
-        raise DeviceError("Конфигурация отозвана", 409)
-    _check_access(device.user)
-    old_server, old_key = device.server, device.public_key
-    server = await _get_server(session, server_id or device.server_id)
-    rotate = server.id == old_server.id
+    async with _mutation_lock:
+        await _seen_snapshot(session)
+        await session.refresh(
+            device,
+            attribute_names=["status", "public_key", "server_id", "protocol", "address", "private_key_enc", "psk_enc"],
+        )
+        if device.status != "active":
+            raise DeviceError("Конфигурация отозвана", 409)
+        owner = await session.get(User, device.user_id)
+        if owner is None:
+            raise DeviceError("Пользователь не найден", 404)
+        await session.refresh(owner, attribute_names=_ACCESS_FIELDS)
+        _check_access(owner)
 
-    if rotate:
-        # same identity slot (WireGuard IP), fresh secrets
-        creds = await _provision(session, server, keep=device if device.protocol == "wireguard" else None)
-    else:
-        creds = await _provision(session, server, keep=device)
-    _apply(device, server, creds)
-    if rotate:
-        device.sub_token = secrets.token_urlsafe(24)
-    device.raw_rx = device.raw_tx = 0
-    device.last_handshake_at = device.session_started_at = None
-    try:
-        await session.commit()
-    except IntegrityError as e:
-        await session.rollback()
-        await remove_peer_quietly(server, creds.key)
-        raise DeviceError("Конфликт адресов, повторите попытку", 409) from e
-    if old_server.id != server.id or old_key != creds.key:
-        await remove_peer_quietly(old_server, old_key)
-    return device
+        old_key = device.public_key
+        old_server = await session.get(Server, device.server_id)
+        if old_server is None:
+            raise DeviceError("Сервер недоступен", 404)
+        server = await _get_server(session, server_id or device.server_id)
+        rotate = server.id == old_server.id
+
+        if rotate:
+            # same identity slot (WireGuard IP), fresh secrets
+            creds = await _provision(session, server, keep=device if device.protocol == "wireguard" else None)
+        else:
+            creds = await _provision(session, server, keep=device)
+        _apply(device, server, creds)
+        if rotate:
+            device.sub_token = secrets.token_urlsafe(24)
+        device.raw_rx = device.raw_tx = 0
+        device.last_handshake_at = device.session_started_at = None
+        kept_server_id = server.id
+        try:
+            await session.commit()
+        except IntegrityError as e:
+            await session.rollback()
+            fresh = await session.get(Server, kept_server_id)
+            if fresh is not None:
+                await _drop_peer_and_heal(session, fresh, creds)
+            raise DeviceError("Конфликт адресов, повторите попытку", 409) from e
+        if old_server.id != server.id or old_key != creds.key:
+            await remove_peer_quietly(old_server, old_key)
+        return device
 
 
 def render_config(device: Device) -> tuple[str, str]:

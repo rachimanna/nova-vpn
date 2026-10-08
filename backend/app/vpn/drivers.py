@@ -4,6 +4,7 @@
 * MockDriver  — local development without any VPN server; simulates peers and traffic.
 """
 
+import asyncio
 import random
 import time
 from dataclasses import dataclass, field
@@ -48,7 +49,12 @@ class NodeDriver(Protocol):
 class AgentDriver:
     def __init__(self, url: str, token: str, timeout: float = 8.0) -> None:
         self._client = httpx.AsyncClient(
-            base_url=url.rstrip("/"), headers={"Authorization": f"Bearer {token}"}, timeout=timeout
+            base_url=url.rstrip("/"),
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=timeout,
+            # Outlive the poll interval so the next ping reuses the TLS session instead of
+            # paying for a fresh handshake on every sample.
+            limits=httpx.Limits(max_keepalive_connections=5, keepalive_expiry=180.0),
         )
 
     async def _call(self, method: str, path: str, **kw) -> dict:
@@ -89,9 +95,14 @@ class AgentDriver:
         await self._call("POST", "/peers/remove", json={"public_key": public_key})
 
     async def ping(self) -> float:
-        start = time.perf_counter()
-        await self._call("GET", "/health")
-        return (time.perf_counter() - start) * 1000
+        # A single request includes a cold TCP+TLS handshake. Keep the connection and report
+        # the best of three, which is the closest figure to the network RTT.
+        samples: list[float] = []
+        for _ in range(3):
+            start = time.perf_counter()
+            await self._call("GET", "/health")
+            samples.append((time.perf_counter() - start) * 1000)
+        return min(samples)
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -130,17 +141,38 @@ class MockDriver:
         return [PeerStat(k, p.rx, p.tx, p.last_handshake) for k, p in self.peers_map.items()]
 
     async def add_peer(self, public_key: str, psk: str, address: str) -> None:
-        self.peers_map.setdefault(public_key, _MockPeer(address=address))
+        # Same rule as `wg set`: the address moves to the peer that claimed it last.
+        for peer in self.peers_map.values():
+            if peer.address == address:
+                peer.address = ""
+        current = self.peers_map.get(public_key)
+        if current is None:
+            self.peers_map[public_key] = _MockPeer(address=address)
+        else:
+            current.address = address
 
     async def remove_peer(self, public_key: str) -> None:
         self.peers_map.pop(public_key, None)
 
     async def ping(self) -> float:
-        base = {"de": 18, "nl": 22, "fi": 31, "se": 35, "pl": 27, "us": 110, "tr": 48}.get(self.server.country, 40)
+        base = {"de": 18, "nl": 22, "fi": 31, "se": 35, "pl": 27, "us": 110, "tr": 48}.get(
+            (self.server.country or "").lower(), 40
+        )
         return base + random.uniform(-3, 4)
 
 
 _agent_cache: dict[int, tuple[str, AgentDriver]] = {}
+_closing: set[asyncio.Task] = set()
+
+
+def _close_later(driver: AgentDriver) -> None:
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    task = loop.create_task(driver.aclose())
+    _closing.add(task)
+    task.add_done_callback(_closing.discard)
 
 
 def get_driver(server: Server) -> NodeDriver:
@@ -154,6 +186,8 @@ def get_driver(server: Server) -> NodeDriver:
         if cached and cached[0] == cache_key:
             return cached[1]
         driver = AgentDriver(server.agent_url, decrypt(server.agent_token_enc))
+        if cached:
+            _close_later(cached[1])
         _agent_cache[server.id] = (cache_key, driver)
         return driver
     raise NodeError(f"unknown driver {server.driver}")

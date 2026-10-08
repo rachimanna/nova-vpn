@@ -46,9 +46,64 @@ def test_tokens():
         verify_token(sign_token("dl", {}, -1), "dl")
 
 
+def test_token_with_valid_signature_but_garbage_body():
+    import hashlib
+    import hmac
+
+    from app.security.crypto import _b64, _secret_key
+
+    body = _b64(b"not-json")
+    sig = _b64(hmac.new(_secret_key(), body.encode(), hashlib.sha256).digest())
+    with pytest.raises(TokenError):
+        verify_token(f"{body}.{sig}", "dl")
+
+
 def test_encryption_roundtrip():
     blob = encrypt("secret")
     assert "secret" not in blob and decrypt(blob) == "secret"
+
+
+def test_latest_bucket_ignores_previous_poll():
+    from datetime import UTC, datetime, timedelta
+
+    from app.services.stats import latest_bucket
+
+    now = datetime.now(UTC)
+    rows = [
+        (now - timedelta(seconds=60), 6000, 60),
+        (now, 6000, 0),
+        (now - timedelta(seconds=1), 3000, 30),
+    ]
+    assert latest_bucket(rows, timedelta(seconds=30)) == (9000, 30)
+
+
+def test_rate_limit_evicts_idle_keys_and_keeps_the_offender():
+    from collections import deque
+
+    from app.security.ratelimit import SlidingWindow, strict_limit
+
+    assert strict_limit("/api/devices", "POST") == ("/api/devices", 10)
+    assert strict_limit("/api/devices/5/regenerate", "POST") is None
+    assert strict_limit("/api/admin/login", "POST") == ("/api/admin/login", 5)
+
+    window = SlidingWindow()
+    now = time.monotonic()
+    window._hits["hot"] = deque([now - 50, now - 50, now - 50])
+    for i in range(20):
+        window._hits[f"k{i}"] = deque([now - 10])
+    # "hot" is already over the limit and older than the other keys. Eviction must not free it.
+    assert window.allow("hot", 3, max_keys=10) is False
+    assert len(window._hits["hot"]) == 3
+    assert len(window._hits) <= 10
+
+
+async def test_mock_ping_respects_country_case():
+    from app.models import Server
+    from app.vpn.drivers import MockDriver
+
+    server = Server(code="de-ping", name="Germany", country="DE", host="de.example", public_key="k")
+    samples = [await MockDriver(server).ping() for _ in range(20)]
+    assert all(15 <= sample <= 22 for sample in samples)
 
 
 def test_wireguard_keys_and_addresses():
