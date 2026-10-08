@@ -2,6 +2,7 @@
   "log": { "loglevel": "warning", "access": "none" },
   "api": { "tag": "api", "services": ["HandlerService", "StatsService"] },
   "stats": {},
+  "dns": { "servers": ["1.1.1.1", "8.8.8.8"], "queryStrategy": "UseIPv4" },
   "policy": {
     "levels": { "0": { "statsUserUplink": true, "statsUserDownlink": true, "statsUserOnline": true } }
   },
@@ -24,7 +25,12 @@
     }
   ],
   "outbounds": [
-    { "protocol": "freedom", "tag": "direct" },
+    {
+      "protocol": "freedom",
+      "tag": "direct",
+      "settings": { "domainStrategy": "UseIPv4" },
+      "streamSettings": { "sockopt": { "tcpFastOpen": true } }
+    },
     { "protocol": "blackhole", "tag": "block" }
   ],
   "routing": {

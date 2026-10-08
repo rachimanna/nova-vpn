@@ -27,7 +27,10 @@ def render_link(*, user_id: str, host: str, port: int, params: dict, name: str) 
     security = params.get("security", "tls")
     query = {"encryption": "none", "type": params.get("transport", "ws"), "security": security}
     if query["type"] == "ws":
-        query["path"] = params.get("path", "/")
+        path = params.get("path", "/")
+        # WebSocket early data: the first request rides in the handshake, saving one round trip
+        # per new connection. Xray accepts it on the server side without extra config.
+        query["path"] = path if "ed=" in path else f"{path}?ed=2048"
         query["host"] = params.get("sni") or host
     if security == "tls":
         query["sni"] = params.get("sni") or host

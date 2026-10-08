@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from typing import Callable
 
+from app.config import get_settings
 from app.models import Device, Server
 from app.security.crypto import decrypt
 from app.vpn import vless, wireguard
@@ -26,6 +27,7 @@ def _render_wireguard(device: Device, server: Server) -> str:
         psk=decrypt(device.psk_enc),
         endpoint_host=server.host,
         endpoint_port=server.port,
+        mtu=get_settings().wg_mtu,
     )
 
 

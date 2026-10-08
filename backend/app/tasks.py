@@ -31,8 +31,8 @@ async def poll_server(session: AsyncSession, server: Server) -> None:
     now = datetime.now(UTC)
     driver = get_driver(server)
     try:
-        ping = await driver.ping()
         peers = {p.public_key: p for p in await driver.peers()}
+        ping = await driver.ping()  # after peers(): the connection to the node is already open
     except NodeError as e:
         if server.online:
             log.warning("server %s went offline: %s", server.code, e)

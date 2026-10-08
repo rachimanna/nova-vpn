@@ -59,3 +59,19 @@ def test_wireguard_keys_and_addresses():
     assert wireguard.allocate_address("10.8.0.0/24", {"10.8.0.2/32", "10.8.0.3/32"}) == "10.8.0.4/32"
     with pytest.raises(RuntimeError):
         wireguard.allocate_address("10.8.0.0/30", {"10.8.0.2/32"})
+
+
+def test_malformed_token_is_rejected_not_crashing():
+    for bad in ("!!!.sig", "e30.sig", "bm90LWpzb24.sig"):
+        with pytest.raises(TokenError):
+            verify_token(bad, "dl")
+
+
+def test_client_configs_tuned_for_latency():
+    from app.vpn import vless, wireguard
+
+    conf = wireguard.render_client_config(private_key="k", address="10.8.0.2/32", dns="1.1.1.1",
+                                          server_public_key="p", psk="s", endpoint_host="h", endpoint_port=1, mtu=1280)
+    assert "MTU = 1280\n" in conf
+    link = vless.render_link(user_id="u", host="h", port=443, params={"path": "/x"}, name="n")
+    assert "path=%2Fx%3Fed%3D2048" in link

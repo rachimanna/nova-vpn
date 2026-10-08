@@ -213,7 +213,13 @@ docker compose exec api python -m app.cli add-server ...   # шаг 8
 ## Что честно умеет и не умеет MVP
 
 - Кнопка «Подключить VPN» **не включает VPN сама**: Mini App физически не может управлять сетью телефона. Она выдаёт конфигурацию и ведёт через импорт, а статус «подключён» backend берёт из WireGuard handshake.
-- **Ping** — это задержка backend → нода. Реальный ping с устройства показывает клиент (Happ / WireGuard).
+- **Ping** — это задержка backend → нода. Реальный ping с устройства показывает клиент (Happ / WireGuard). Меряется по уже открытому соединению, лучшее из 3 замеров (без TLS-рукопожатия).
+
+### Низкий ping
+
+- `install.sh` включает на ноде BBR + `fq`, TCP Fast Open и отключает slow start после простоя (`/etc/sysctl.d/98-nova-latency.conf`).
+- WireGuard: клиентам выдаётся `MTU = 1280` (`WG_MTU` в `.env`) — без фрагментации на мобильных сетях; на ноде MSS clamping. На уже установленной ноде с WireGuard добавьте правило вручную: `iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu`.
+- VLESS: в ссылке `path=…?ed=2048` (WebSocket early data) — на один round trip меньше на каждое новое соединение. Xray резолвит DNS сам, с кэшем, только IPv4. Конфиги клиентов обновятся при следующем обновлении подписки.
 - «Подключён» для VLESS означает, что за последние ~3 минуты по ключу шёл трафик (у Xray нет handshake, как у WireGuard).
 - **Скорость** — фактическая средняя скорость передачи за последний интервал опроса, а не speedtest.
 - Rate limiter хранит состояние в памяти: для нескольких реплик API нужен Redis.

@@ -26,6 +26,22 @@ echo "==> Installing base packages"
 apt-get update -qq
 apt_install python3-venv python3-pip curl ca-certificates gnupg
 
+echo "==> Tuning the network stack for low latency (BBR, fq, TCP Fast Open)"
+cat > /etc/sysctl.d/98-nova-latency.conf <<'SYSCTL'
+net.core.default_qdisc=fq
+net.ipv4.tcp_congestion_control=bbr
+net.ipv4.tcp_fastopen=3
+net.ipv4.tcp_slow_start_after_idle=0
+net.ipv4.tcp_notsent_lowat=16384
+net.ipv4.tcp_mtu_probing=1
+net.core.rmem_max=16777216
+net.core.wmem_max=16777216
+net.ipv4.udp_rmem_min=16384
+net.ipv4.udp_wmem_min=16384
+SYSCTL
+modprobe tcp_bbr 2>/dev/null || true
+sysctl -q --system || true
+
 PUBLIC_IP=$(curl -4 -s --max-time 5 https://api.ipify.org || echo "<PUBLIC_IP>")
 
 # ---------------------------------------------------------------- WireGuard
@@ -47,8 +63,8 @@ install_wireguard() {
 Address = $server_ip
 ListenPort = $WG_PORT
 PrivateKey = $(wg genkey)
-PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -A FORWARD -o %i -m state --state RELATED,ESTABLISHED -j ACCEPT; iptables -t nat -A POSTROUTING -s $WG_SUBNET -o $wan -j MASQUERADE
-PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -D FORWARD -o %i -m state --state RELATED,ESTABLISHED -j ACCEPT; iptables -t nat -D POSTROUTING -s $WG_SUBNET -o $wan -j MASQUERADE
+PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -A FORWARD -o %i -m state --state RELATED,ESTABLISHED -j ACCEPT; iptables -t nat -A POSTROUTING -s $WG_SUBNET -o $wan -j MASQUERADE; iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -D FORWARD -o %i -m state --state RELATED,ESTABLISHED -j ACCEPT; iptables -t nat -D POSTROUTING -s $WG_SUBNET -o $wan -j MASQUERADE; iptables -t mangle -D FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 CONF
   fi
   systemctl enable --now "wg-quick@$WG_IF" >/dev/null

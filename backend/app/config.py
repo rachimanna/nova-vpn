@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     cors_origins: str = ""  # comma separated, only if frontend is on another origin
     frontend_dist: str = "../frontend/dist"
 
+    # WireGuard client MTU. 1280 avoids fragmentation on mobile/PPPoE links (lower latency, no stalls)
+    wg_mtu: int = 1280
+
     # Limits for new users
     default_device_limit: int = 3
     default_traffic_limit_gb: float = 50

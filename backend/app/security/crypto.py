@@ -72,7 +72,12 @@ def verify_token(token: str, purpose: str) -> dict:
     expected = _b64(hmac.new(_secret_key(), body.encode(), hashlib.sha256).digest())
     if not hmac.compare_digest(expected, sig):
         raise TokenError("bad signature")
-    data = json.loads(_unb64(body))
+    try:
+        data = json.loads(_unb64(body))
+    except ValueError as e:  # bad base64 / utf-8 / json: a 4xx, not a 500
+        raise TokenError("malformed token") from e
+    if not isinstance(data, dict):
+        raise TokenError("malformed token")
     if data.get("p") != purpose:
         raise TokenError("wrong purpose")
     if data.get("exp", 0) < time.time():

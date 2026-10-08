@@ -104,8 +104,9 @@ async def settings(cb: CallbackQuery) -> None:
 async def toggle_notifications(cb: CallbackQuery) -> None:
     async with SessionLocal() as session:
         user = await session.scalar(select(User).where(User.tg_id == cb.from_user.id))
-        user.notifications = not user.notifications
-        await session.commit()
+        if user is not None:  # an old message from before the user record existed
+            user.notifications = not user.notifications
+            await session.commit()
     await settings(cb)
 
 

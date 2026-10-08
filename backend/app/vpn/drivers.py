@@ -88,10 +88,16 @@ class AgentDriver:
     async def remove_peer(self, public_key: str) -> None:
         await self._call("POST", "/peers/remove", json={"public_key": public_key})
 
-    async def ping(self) -> float:
-        start = time.perf_counter()
+    async def ping(self, samples: int = 3) -> float:
+        # The first request after an idle period opens a new TCP+TLS connection and would report
+        # ~3 round trips. Warm the connection up, then take the best of a few samples.
         await self._call("GET", "/health")
-        return (time.perf_counter() - start) * 1000
+        best = float("inf")
+        for _ in range(samples):
+            start = time.perf_counter()
+            await self._call("GET", "/health")
+            best = min(best, (time.perf_counter() - start) * 1000)
+        return best
 
     async def aclose(self) -> None:
         await self._client.aclose()

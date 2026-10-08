@@ -18,6 +18,9 @@ if [ -n "$WAN_IF" ]; then
   iptables -C FORWARD -i "$WG_INTERFACE" -j ACCEPT 2>/dev/null || iptables -A FORWARD -i "$WG_INTERFACE" -j ACCEPT
   iptables -C FORWARD -o "$WG_INTERFACE" -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null \
     || iptables -A FORWARD -o "$WG_INTERFACE" -m state --state RELATED,ESTABLISHED -j ACCEPT
+  # no fragmented TCP through the tunnel: clamp MSS to the path MTU
+  iptables -t mangle -C FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null \
+    || iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 fi
 echo "WireGuard $WG_INTERFACE up: $SERVER_IP, port $WG_PORT, public key $(wg show "$WG_INTERFACE" public-key)"
 exec uvicorn agent:app --host "$AGENT_BIND" --port "$AGENT_PORT" --no-access-log

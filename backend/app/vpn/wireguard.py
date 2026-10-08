@@ -64,6 +64,7 @@ def render_client_config(
     psk: str,
     endpoint_host: str,
     endpoint_port: int,
+    mtu: int | None = None,
 ) -> str:
     host = f"[{endpoint_host}]" if ":" in endpoint_host else endpoint_host
     return (
@@ -71,7 +72,8 @@ def render_client_config(
         f"PrivateKey = {private_key}\n"
         f"Address = {address}\n"
         f"DNS = {dns}\n"
-        "\n"
+        + (f"MTU = {mtu}\n" if mtu else "")
+        + "\n"
         "[Peer]\n"
         f"PublicKey = {server_public_key}\n"
         f"PresharedKey = {psk}\n"
