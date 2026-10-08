@@ -1,5 +1,6 @@
 """Admin panel API. Every route except login requires a signed admin session token."""
 
+import hashlib
 import hmac
 import logging
 from datetime import UTC, datetime, timedelta
@@ -7,14 +8,15 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import String, cast, func, or_, select
+from sqlalchemy import String, cast, delete, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import require_admin
 from app.config import get_settings
 from app.db import get_session
-from app.models import Device, Server, User
+from app.models import ConsumedToken, Device, Server, User
 from app.security.crypto import TokenError, encrypt, sign_token, verify_token
 from app.services import devices as device_service
 from app.services import stats as stats_service
@@ -86,7 +88,7 @@ async def login(body: Login, request: Request):
 
 
 @router.post("/exchange")
-async def exchange(body: Exchange):
+async def exchange(body: Exchange, session: AsyncSession = Depends(get_session)):
     """One-time link sent by the bot (/admin) to Telegram admins -> admin session."""
     try:
         data = verify_token(body.token, "admin_link")
@@ -94,6 +96,23 @@ async def exchange(body: Exchange):
         raise HTTPException(401, "Ссылка устарела, запросите /admin в боте") from e
     if data.get("tg") not in get_settings().admin_ids:
         raise HTTPException(403, "Нет доступа")
+    digest = hashlib.sha256(body.token.encode()).hexdigest()
+    now = datetime.now(UTC)
+    await session.execute(delete(ConsumedToken).where(ConsumedToken.expires_at < now))
+    if await session.get(ConsumedToken, digest):
+        raise HTTPException(401, "Ссылка уже использована, запросите /admin в боте")
+    exp = data.get("exp")
+    session.add(
+        ConsumedToken(
+            token_hash=digest,
+            expires_at=datetime.fromtimestamp(int(exp), UTC) if exp else now,
+        )
+    )
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        raise HTTPException(401, "Ссылка уже использована, запросите /admin в боте")
     return _session_token(f"tg:{data['tg']}")
 
 

@@ -107,6 +107,7 @@ async def test_admin(client):
     # bot-issued one-time link for Telegram admins
     link = sign_token("admin_link", {"tg": 42}, 60)
     assert (await client.post("/api/admin/exchange", json={"token": link})).status_code == 200
+    assert (await client.post("/api/admin/exchange", json={"token": link})).status_code == 401
     bad = sign_token("admin_link", {"tg": 43}, 60)
     assert (await client.post("/api/admin/exchange", json={"token": bad})).status_code == 403
 
@@ -145,3 +146,58 @@ async def test_vless_subscription(client):
     assert (await client.get(sub_path)).status_code == 404
 
     assert (await client.get("/api/sub/" + "x" * 32)).status_code == 404
+
+
+async def test_concurrent_creates_keep_unique_addresses(client):
+    import asyncio
+
+    h = {"X-Dev-User": "7202"}
+    servers = (await client.get("/api/servers", headers=h)).json()
+    wg = next(s for s in servers if s["protocol"] == "wireguard")
+    results = await asyncio.gather(
+        *[client.post("/api/devices", headers=h, json={"server_id": wg["id"], "name": f"c{i}"}) for i in range(5)]
+    )
+    created = [r for r in results if r.status_code == 201]
+    rejected = [r for r in results if r.status_code == 409]
+    assert len(created) == 3, [(r.status_code, r.text) for r in results]
+    assert len(rejected) == 2
+    assert all("лимит" in r.json()["detail"].lower() for r in rejected)
+    assert len({r.json()["address"] for r in created}) == 3
+    me = (await client.get("/api/me", headers=h)).json()
+    assert me["user"]["devices_active"] == 3
+
+
+async def test_address_conflict_restores_owner(client):
+    h = {"X-Dev-User": "7101"}
+    servers = (await client.get("/api/servers", headers=h)).json()
+    wg = next(s for s in servers if s["protocol"] == "wireguard")
+    created = (await client.post("/api/devices", headers=h, json={"server_id": wg["id"], "name": "race"})).json()
+
+    from app.db import SessionLocal
+    from app.models import Device, Server
+    from app.services.devices import Credentials, _drop_peer_and_heal
+    from app.vpn.drivers import get_driver
+
+    async with SessionLocal() as session:
+        device = await session.get(Device, created["id"])
+        server = await session.get(Server, device.server_id)
+        driver = get_driver(server)
+        await driver.add_peer("stolen-key", "psk", device.address)
+        assert driver.peers_map[device.public_key].address == ""
+        await _drop_peer_and_heal(session, server, Credentials("stolen-key", "x", "x", device.address))
+        assert driver.peers_map[device.public_key].address == device.address
+        assert "stolen-key" not in driver.peers_map
+
+
+async def test_regenerate_is_not_create_rate_limited(client):
+    h = {"X-Dev-User": "7303"}
+    servers = (await client.get("/api/servers", headers=h)).json()
+    wg = next(s for s in servers if s["protocol"] == "wireguard")
+    device = (await client.post("/api/devices", headers=h, json={"server_id": wg["id"], "name": "regen"})).json()
+    for _ in range(12):
+        response = await client.post(f"/api/devices/{device['id']}/regenerate", headers=h, json={})
+        assert response.status_code == 200, response.text
+
+
+async def test_download_garbage_token(client):
+    assert (await client.get("/api/download/not-a-token")).status_code == 404

@@ -27,16 +27,20 @@ export function AddDeviceSheet() {
   if (!addDeviceOpen) return null
   const chosen = server ?? serverId
 
+  const close = () => {
+    setPlatform(detectPlatform())
+    setServer(null)
+    setName('')
+    setAddDeviceOpen(false)
+  }
+
   const submit = async () => {
     const res = await create({ platform, server: chosen, name: name || undefined })
-    if (res) {
-      setName('')
-      setAddDeviceOpen(false)
-    }
+    if (res) close()
   }
 
   return (
-    <Sheet title="Новое устройство" onClose={() => setAddDeviceOpen(false)}>
+    <Sheet title="Новое устройство" onClose={close}>
       <div className="field">
         <label>Платформа</label>
         <div className="chips">

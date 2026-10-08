@@ -14,27 +14,55 @@ from starlette.middleware.base import BaseHTTPMiddleware
 class SlidingWindow:
     def __init__(self) -> None:
         self._hits: dict[str, deque[float]] = defaultdict(deque)
+        self._seen: dict[str, float] = {}
 
-    def allow(self, key: str, limit: int, window: float = 60.0) -> bool:
+    def allow(self, key: str, limit: int, window: float = 60.0, *, max_keys: int = 50_000) -> bool:
         now = time.monotonic()
+        # A rejected caller does not append a hit, but must stay "recent" or eviction frees them.
+        self._seen[key] = now
+        self._evict(now, window, max_keys)
         q = self._hits[key]
         while q and now - q[0] > window:
             q.popleft()
         if len(q) >= limit:
             return False
         q.append(now)
-        if len(self._hits) > 50_000:  # crude memory guard
-            self._hits.clear()
         return True
+
+    def _evict(self, now: float, window: float, max_keys: int) -> None:
+        """Drop idle keys. Never wipe the table: that would also forget whoever is over the limit."""
+        if len(self._hits) <= max_keys:
+            return
+        stale = [k for k, q in self._hits.items() if not q or now - q[-1] > window]
+        for key in stale:
+            del self._hits[key]
+            self._seen.pop(key, None)
+        overflow = len(self._hits) - max_keys
+        if overflow <= 0:
+            return
+        # Oldest attempts first. allow() marks the caller seen before evicting, so a key that is
+        # over its limit stays in the newest group and is not freed.
+        ranked = sorted(self._hits, key=lambda k: self._seen.get(k, 0.0))
+        for key in ranked[:overflow]:
+            del self._hits[key]
+            self._seen.pop(key, None)
 
 
 limiter = SlidingWindow()
 
-# Stricter buckets for sensitive endpoints: (path prefix, method, limit per minute)
+# Stricter buckets for sensitive endpoints: (exact path, method, limit per minute).
+# Exact, so POST /api/devices/{id}/regenerate is not counted as creating a device.
 STRICT = [
     ("/api/admin/login", "POST", 5),
     ("/api/devices", "POST", 10),
 ]
+
+
+def strict_limit(path: str, method: str) -> tuple[str, int] | None:
+    for prefix, verb, limit in STRICT:
+        if method == verb and (path == prefix or path == prefix + "/"):
+            return prefix, limit
+    return None
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -48,10 +76,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         ip = request.client.host if request.client else "unknown"
 
-        for prefix, method, limit in STRICT:
-            if request.method == method and path.startswith(prefix):
-                if not limiter.allow(f"{ip}:{prefix}", limit):
-                    return _too_many()
+        if hit := strict_limit(path, request.method):
+            prefix, limit = hit
+            if not limiter.allow(f"{ip}:{prefix}", limit):
+                return _too_many()
 
         if not limiter.allow(ip, self.per_minute):
             return _too_many()

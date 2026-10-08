@@ -131,6 +131,15 @@ class Device(Base):
     server: Mapped[Server] = relationship(lazy="joined")
 
 
+class ConsumedToken(Base):
+    """Admin links already exchanged for a session. The hash is enough; the token itself is not stored."""
+
+    __tablename__ = "consumed_tokens"
+
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    expires_at: Mapped[datetime] = mapped_column(TZDateTime())
+
+
 class TrafficSample(Base):
     """Per-device traffic delta over one poll interval, client perspective."""
 
